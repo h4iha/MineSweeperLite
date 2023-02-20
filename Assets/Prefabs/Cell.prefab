@@ -59,7 +59,7 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: 
   m_Material: {fileID: 0}
-  m_Color: {r: 1, g: 1, b: 1, a: 1}
+  m_Color: {r: 0.21132074, g: 0.39685017, b: 0.5283019, a: 1}
   m_RaycastTarget: 1
   m_RaycastPadding: {x: 0, y: 0, z: 0, w: 0}
   m_Maskable: 1
@@ -225,7 +225,9 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 5baddda14e0840e4ab46e60f2d1d7c55, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  allIconOfCell:
+  indexRow: 0
+  indexColumn: 0
+  icons:
   - {fileID: 21300000, guid: 5e4cd74f28d83444b8ccf6aadf98730a, type: 3}
   - {fileID: 21300000, guid: b7dc76d6c0e217440b2ad009f26fd556, type: 3}
   - {fileID: 21300000, guid: 9d1cf0a4c6cab8d4bbdd52205a489edf, type: 3}
@@ -235,9 +237,11 @@ MonoBehaviour:
   - {fileID: 21300000, guid: 5a7bb90a4db387940a24e13baf8e2000, type: 3}
   - {fileID: 21300000, guid: 57e53738070eef745b7335fc816dcb6a, type: 3}
   - {fileID: 21300000, guid: 7c9c4e62e9eb4474e9f6b5691657c2dd, type: 3}
+  - {fileID: 21300000, guid: bfc583f98e74dc548ad9c61282aa1540, type: 3}
+  background: {fileID: 2181342363393799135}
   unrevealedGameObject: {fileID: 1871115215414509180}
   flagGameObject: {fileID: 7168174897034260981}
-  iconOfCell: {fileID: 1110923789987293486}
+  icon: {fileID: 1110923789987293486}
   valueOfCell: 0
 --- !u!1 &3916505390987524327
 GameObject:
@@ -251,7 +255,7 @@ GameObject:
   - component: {fileID: 4836211072997741916}
   - component: {fileID: 1110923789987293486}
   m_Layer: 5
-  m_Name: Icon Of Cell
+  m_Name: Icon
   m_TagString: Untagged
   m_Icon: {fileID: 0}
   m_NavMeshLayer: 0

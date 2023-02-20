@@ -1,253 +1,358 @@
 using System;
 using System.Collections.Generic;
 using UnityEngine;
+using UnityEngine.EventSystems;
 using UnityEngine.UI;
-
+public enum EnumDirection
+{
+    UpperLeft, UpperCenter, UpperRight, MiddleLeft, MiddleRight, LowerLeft, LowerCenter, LowerRight
+}
+public enum EnumGameStatus
+{
+    Nothing, Won, Lost
+}
+public enum EnumTypeNotifier
+{
+    Data, Status
+}
 public class GameManager : MonoBehaviour
 {
-    [SerializeField] private GridLayoutGroup gridLayoutGroup;
-    [SerializeField] private Cell cellPrefab;
-    private Cell[,] data;
-    private int cellsInRow = 6;
-    private int amountOfMine = 6;
+    private static GameManager instance = null;
+    public static GameManager Instance { get { return instance; } }
+    [SerializeField] private GridLayoutGroup gridLayoutGroup = null;
+    [SerializeField] private Cell cellPrefab = null;
+    [SerializeField] private int maxNumberOfSquaresInRow = 0;
+    [SerializeField] private int minNumberOfSquaresInRow = 0;
+    private int maxNumberOfMines = 0;
+    private int minNumberOfMines = 0;
+    private int currentNumberOfSquaresInRow = 0;
+    private int currentNumberOfMines = 0;
+    private Cell[,] boardData = null;
+    private List<IObserver> observers = new List<IObserver>();
+    List<EnumDirection> enumDirections = new List<EnumDirection>();
+    private EnumGameStatus gameStatus;
+    public Action<int, int, int>  onCheckAndRevealBlankCells;
+    public Action onMassageLostGame;
+    public Action onCheckWon;
+    
+    private void Awake()
+    {
+        instance = this;
+        AddEnumDirections();
+        // Action
+        onCheckAndRevealBlankCells = HandleRevealBlankCells;
+        onCheckWon = HandleCheckWon;
+        onMassageLostGame = HandleMassageLostGame;
+        // data
+        currentNumberOfSquaresInRow = minNumberOfSquaresInRow;
+        FixLimitNumberOfMines();
+        currentNumberOfMines = minNumberOfMines;
+        boardData = new Cell[maxNumberOfSquaresInRow, maxNumberOfSquaresInRow];
+        // Cell
+        CreateHiddenCells();
+    }
     private void Start()
     {
-        ResetData();
+        GenerateBoardData();
     }
-    private void ChangeCellsInRow(int amount)
+    protected void NotifyObservers(EnumTypeNotifier type)
     {
-        cellsInRow += amount;
-        FixedAmountOfMine();
-        EditSizeBoard();
-        ResetData();
-    }
-    private void FixedAmountOfMine()
-    {
-        if (amountOfMine < cellsInRow)
+        observers.ForEach(delegate (IObserver observer)
         {
-            amountOfMine = cellsInRow;
-        }
-        if (amountOfMine > cellsInRow * 2)
-        {
-            amountOfMine = cellsInRow * 2;
-        }
-
-    }
-    private void ChangeAmountOfMines(int amount)
-    {
-        amountOfMine += amount;
-        ResetData();
-    }
-    private void ResetData()
-    {
-        data = new Cell[cellsInRow, cellsInRow];
-        if(gridLayoutGroup.transform.childCount != 0)
-        {
-            RemoveOldCells();
-        }
-        InstantiateCells();
-        AddMines(CreateRandomList(data.Length));
-        AddValueInCells();
-    }
-    private void RemoveOldCells()
-    {
-        foreach (GameObject child in gridLayoutGroup.transform)
-        {
-            Destroy(child.gameObject);
-        }
-    }
-    private void EditSizeBoard()
-    {
-        int widthOfGridLayoutGroup = 840;
-        float lengthOfSpacing = widthOfGridLayoutGroup / cellsInRow * 10 + cellsInRow + 1;
-        float lengthOfCellSize = lengthOfSpacing * 10;
-        gridLayoutGroup.constraintCount = cellsInRow;
-        gridLayoutGroup.cellSize = new Vector2(lengthOfCellSize, lengthOfCellSize);
-        gridLayoutGroup.spacing = new Vector2(lengthOfSpacing, lengthOfSpacing);
-    }
-    private void InstantiateCells()
-    {
-        for (int indexRow = 0; indexRow < cellsInRow; indexRow++)
-        {
-            for (int indexColumn = 0; indexColumn < cellsInRow; indexColumn++)
+            switch (type)
             {
-                data[indexRow, indexColumn] = Instantiate(cellPrefab, gridLayoutGroup.transform);
+                case EnumTypeNotifier.Data:
+                    observer.OnRestartDataNotify(currentNumberOfSquaresInRow, currentNumberOfMines);
+                    break;
+                case EnumTypeNotifier.Status:
+                    
+                    observer.OnStatusNotify(gameStatus);
+                    break;
             }
-        }
+        });
     }
-    private void AddMines(List<int> randomList)
+    private void HandleCheckWon()
     {
-        for (int index = 0; index < amountOfMine; index++)
+        EnumGameStatus tempStatus = EnumGameStatus.Won;
+        for (int indexRow = 0; indexRow < currentNumberOfSquaresInRow; indexRow++)
         {
-            int indexRandom = UnityEngine.Random.Range(0, randomList.Count);
-            int number = randomList[indexRandom];
-            int rowOfData = number / cellsInRow;
-            int columnOfData = number % cellsInRow;
-            randomList.RemoveAt(indexRandom);
-            data[rowOfData, columnOfData].Value = -1;
-        }
-    }
-    private void AddValueInCells()
-    {
-        for (int indexOfRow = 0; indexOfRow < cellsInRow; indexOfRow++)
-        {
-            for (int indexOfColumn = 0; indexOfColumn < cellsInRow; indexOfColumn++)
+            for (int indexColumn = 0; indexColumn < currentNumberOfSquaresInRow; indexColumn++)
             {
-                if (data[indexOfRow, indexOfColumn].Value != -1)
+                Cell cellIsChecked = boardData[indexRow, indexColumn];
+                if (cellIsChecked.Value != 9 && cellIsChecked.IsClicked == false)
                 {
-                    data[indexOfRow, indexOfColumn].Value = CheckMines(indexOfRow, indexOfColumn);
+                    tempStatus = EnumGameStatus.Nothing;
                 }
             }
         }
+        MassageGameStatus(tempStatus);
     }
-    private List<int> CreateRandomList(int length)
+    private void HandleMassageLostGame()
+    {
+        for (int indexRow = 0; indexRow < maxNumberOfSquaresInRow; indexRow++)
+        {
+            for (int indexColumn = 0; indexColumn < maxNumberOfSquaresInRow; indexColumn++)
+            {
+                if (boardData[indexColumn, indexRow].Value == 9)
+                {
+                    boardData[indexColumn, indexRow].onReveal?.Invoke(false);
+                }
+            }
+        }
+        MassageGameStatus(EnumGameStatus.Lost);
+    }
+    private void HandleRevealBlankCells(int indexRow, int indexColumn, int valueBlank = 0)
+    {
+        CheckTheValueOfTheNearCell(indexRow, indexColumn, EnumDirection.UpperCenter, valueBlank, true);
+        CheckTheValueOfTheNearCell(indexRow, indexColumn, EnumDirection.MiddleRight, valueBlank, true);
+        CheckTheValueOfTheNearCell(indexRow, indexColumn, EnumDirection.LowerCenter, valueBlank, true);
+        CheckTheValueOfTheNearCell(indexRow, indexColumn, EnumDirection.MiddleLeft, valueBlank, true);
+    }
+    private void CreateHiddenCells()
+    {
+        for (int indexRow = 0; indexRow < maxNumberOfSquaresInRow; indexRow++)
+        {
+            for (int indexColumn = 0; indexColumn < maxNumberOfSquaresInRow; indexColumn++)
+            {
+                Cell newHiddenCell = Instantiate(cellPrefab, gridLayoutGroup.transform);
+                newHiddenCell.Value = 0;
+                newHiddenCell.IndexRow = indexRow;
+                newHiddenCell.IndexColumn = indexColumn;
+                boardData[indexRow, indexColumn] = newHiddenCell;
+                newHiddenCell.gameObject.SetActive(false);
+            }
+        }
+    }
+    private void MassageGameStatus(EnumGameStatus gameStatus)
+    {
+        switch(gameStatus)
+        {
+            case EnumGameStatus.Nothing:
+                {
+                    this.gameStatus = EnumGameStatus.Nothing;
+                }
+                break;
+            case EnumGameStatus.Won:
+                {
+                    this.gameStatus = EnumGameStatus.Won;
+                    NotifyObservers(EnumTypeNotifier.Status);
+                }
+                break;
+            case EnumGameStatus.Lost:
+                {
+                    this.gameStatus = EnumGameStatus.Lost;
+                    NotifyObservers(EnumTypeNotifier.Status);
+                }
+                break;
+        }
+    }
+    private void GenerateBoardData()
+    {
+        MassageGameStatus(EnumGameStatus.Nothing);
+        ResetBoardData();
+        DoEnableCells();
+        SetMines();
+        SetValueToBoardData();
+        NotifyObservers(EnumTypeNotifier.Data);
+    }
+    private void ResetBoardData()
+    {
+        for (int indexRow = 0; indexRow < maxNumberOfSquaresInRow; indexRow++)
+        {
+            for (int indexColumn = 0; indexColumn < maxNumberOfSquaresInRow; indexColumn++)
+            {
+                boardData[indexRow, indexColumn].onReset?.Invoke();
+            }
+        }
+    }
+    private void DoEnableCells()
+    {
+        for (int indexRow = 0; indexRow < maxNumberOfSquaresInRow; indexRow++)
+        {
+            for (int indexColumn = 0; indexColumn < maxNumberOfSquaresInRow; indexColumn++)
+            {
+                bool actived = indexRow >= currentNumberOfSquaresInRow || indexColumn >= currentNumberOfSquaresInRow ? false : true;
+                boardData[indexRow, indexColumn].gameObject.SetActive(actived);
+            }
+        }
+    }
+    private void SetMines( int valueMines = 9)
     {
         List<int> randomList = new List<int>();
-        for (int index = 0; index < length; index++)
+        randomList = CreateRandomList();
+        for (int indexMines = 0; indexMines < currentNumberOfMines; indexMines++)
         {
-            randomList.Add(index);
+            int indexRandom = UnityEngine.Random.Range(0, randomList.Count);
+            int indexRow = randomList[indexRandom] / currentNumberOfSquaresInRow;
+            int indexColumn = randomList[indexRandom] % currentNumberOfSquaresInRow;
+            boardData[indexRow, indexColumn].Value = valueMines;
+            randomList.RemoveAt(indexRandom);
         }
-        return randomList;
     }
-    #region Check Mine 
-    private int CheckMines(int indexOfRow, int indexOfColumn)
+    private List<int> CreateRandomList()
     {
-        return CheckMineOnUpperLeft(indexOfRow, indexOfColumn)
-            + CheckMineOnUpperCenter(indexOfRow, indexOfColumn)
-            + CheckMineOnUpperRight(indexOfRow, indexOfColumn)
-            + CheckMineOnMiddleLeft(indexOfRow, indexOfColumn)
-            + CheckMineOnMiddleRight(indexOfRow, indexOfColumn)
-            + CheckMineOnLowerLeft(indexOfRow, indexOfColumn)
-            + CheckMineOnLowerCenter(indexOfRow, indexOfColumn)
-            + CheckMineOnLowerRight(indexOfRow, indexOfColumn);
+        List<int> list = new List<int>();
+        for (int index = 0; index < currentNumberOfSquaresInRow * currentNumberOfSquaresInRow; index++)
+        {
+            list.Add(index);
+        }
+        return list;
     }
-    private int CheckMineOnUpperLeft(int indexOfRow, int indexOfColumn)
+    private void SetValueToBoardData()
     {
-        if (indexOfRow == 0 || indexOfColumn == 0)
+        for (int indexRow = 0; indexRow < currentNumberOfSquaresInRow; indexRow++)
         {
-            return 0;
+            for (int indexColumn = 0; indexColumn < currentNumberOfSquaresInRow; indexColumn++)
+            {
+                SetValueToCell(indexRow, indexColumn);
+            }
         }
-        if (data[indexOfRow - 1, indexOfColumn - 1].Value != -1)
-        {
-            return 0;
-        }
-        return 1;
     }
-    private int CheckMineOnUpperCenter(int indexOfRow, int indexOfColumn)
+    private void SetValueToCell(int indexRow, int indexColumn, int valueMines = 9)
     {
-        if (indexOfRow == 0)
+        int result = 0;
+        if (boardData[indexRow, indexColumn].Value != valueMines)
         {
-            return 0;
+            for (int indexList = 0; indexList < enumDirections.Count; indexList++)
+            {
+                result += CheckTheValueOfTheNearCell(indexRow, indexColumn, enumDirections[indexList], valueMines) ? 1 : 0;
+            }
+            boardData[indexRow, indexColumn].Value = result;
         }
-        if (data[indexOfRow - 1, indexOfColumn].Value != -1)
-        {
-            return 0;
-        }
-        return 1;
     }
-    private int CheckMineOnUpperRight(int indexOfRow, int indexOfColumn)
+    private bool CheckTheValueOfTheNearCell(int indexRow, int indexColumn, EnumDirection enumDirection, int valueCheck, bool revelationIsAllowed = false)
     {
-        if (indexOfRow == 0 || indexOfColumn == Mathf.Sqrt(data.Length) - 1)
+        bool result = false;
+        // exclusion = -1 : khong co truong hop nao khong hop le
+        // exclusion = 0 : index dang nho nhat => left, upper
+        // exclusion = maxNumberOfSquaresInRow - 1 : index dang lon nhat   => right, lower
+        int exclusionIndexRow = -1; 
+        int exclusionIndexColumn = -1;
+        int indexRowToCheck = indexRow;
+        int indexColumnToCheck = indexColumn;
+        switch(enumDirection)
         {
-            return 0;
+            case EnumDirection.UpperLeft:
+                {
+                    exclusionIndexRow = 0;
+                    exclusionIndexColumn = 0;
+                    indexRowToCheck -= 1;
+                    indexColumnToCheck -= 1;
+                }
+                break;
+            case EnumDirection.UpperCenter:
+                {
+                    exclusionIndexRow = 0;
+                    indexRowToCheck -= 1;
+                }
+                break;
+            case EnumDirection.UpperRight:
+                {
+                    exclusionIndexRow = 0;
+                    exclusionIndexColumn = currentNumberOfSquaresInRow - 1;
+                    indexRowToCheck -= 1;
+                    indexColumnToCheck += 1;
+                }
+                break;
+            case EnumDirection.MiddleLeft:
+                {
+                    exclusionIndexColumn = 0;
+                    indexColumnToCheck -= 1;
+                }
+                break;
+            case EnumDirection.MiddleRight:
+                {
+                    exclusionIndexColumn = currentNumberOfSquaresInRow - 1;
+                    indexColumnToCheck += 1;
+                }
+                break;
+            case EnumDirection.LowerLeft:
+                {
+                    exclusionIndexRow = currentNumberOfSquaresInRow - 1;
+                    exclusionIndexColumn = 0;
+                    indexRowToCheck += 1;
+                    indexColumnToCheck -= 1;
+                }
+                break;
+            case EnumDirection.LowerCenter:
+                {
+                    exclusionIndexRow = currentNumberOfSquaresInRow - 1;
+                    indexRowToCheck += 1;
+                }
+                break;
+            case EnumDirection.LowerRight:
+                {
+                    exclusionIndexRow = currentNumberOfSquaresInRow - 1;
+                    exclusionIndexColumn = currentNumberOfSquaresInRow - 1;
+                    indexRowToCheck += 1;
+                    indexColumnToCheck += 1;
+                }
+                break;
         }
-        if (data[indexOfRow - 1, indexOfColumn + 1].Value != -1)
+        if (indexRow == exclusionIndexRow || indexColumn == exclusionIndexColumn)
         {
-            return 0;
+            result = false;
         }
-        return 1;
+        else
+        {
+            Cell cellIsChecked = boardData[indexRowToCheck, indexColumnToCheck];
+            if (cellIsChecked.Value == valueCheck)
+            {
+                if(revelationIsAllowed && !cellIsChecked.IsClicked)
+                {
+                    cellIsChecked.onReveal?.Invoke(true);
+                }
+                result = true;
+            }
+            else
+            {
+                result = false;
+            }
+        }
+        return result;
     }
-    private int CheckMineOnMiddleLeft(int indexOfRow, int indexOfColumn)
+    private void FixLimitNumberOfMines()
     {
-        if (indexOfColumn == 0)
-        {
-            return 0;
-        }
-        if (data[indexOfRow, indexOfColumn - 1].Value != -1)
-        {
-            return 0;
-        }
-        return 1;
+        minNumberOfMines = currentNumberOfSquaresInRow;
+        maxNumberOfMines = currentNumberOfSquaresInRow * 2;
     }
-    private int CheckMineOnMiddleRight(int indexOfRow, int indexOfColumn)
+    private void AddEnumDirections()
     {
-        if (indexOfColumn == Mathf.Sqrt(data.Length) - 1)
-        {
-            return 0;
-        }
-        if (data[indexOfRow, indexOfColumn + 1].Value != -1)
-        {
-            return 0;
-        }
-        return 1;
+        enumDirections.Add(EnumDirection.MiddleLeft);
+        enumDirections.Add(EnumDirection.UpperCenter);
+        enumDirections.Add(EnumDirection.MiddleRight);
+        enumDirections.Add(EnumDirection.LowerCenter);
+        enumDirections.Add(EnumDirection.UpperLeft);
+        enumDirections.Add(EnumDirection.UpperRight);
+        enumDirections.Add(EnumDirection.LowerLeft);
+        enumDirections.Add(EnumDirection.LowerRight);
     }
-    private int CheckMineOnLowerLeft(int indexOfRow, int indexOfColumn)
+    public void AddObserver(IObserver observer)
     {
-        if (indexOfRow == Mathf.Sqrt(data.Length) - 1 || indexOfColumn == 0)
-        {
-            return 0;
-        }
-        if (data[indexOfRow + 1, indexOfColumn - 1].Value != -1)
-        {
-            return 0;
-        }
-        return 1;
+        observers.Add(observer);
     }
-    private int CheckMineOnLowerCenter(int indexOfRow, int indexOfColumn)
+    public void RemoveObserver(IObserver observer) 
+    { 
+        observers.Remove(observer);
+    }
+    public void RestartGame()
     {
-        if (indexOfRow == Mathf.Sqrt(data.Length) - 1)
-        {
-            return 0;
-        }
-        if (data[indexOfRow + 1, indexOfColumn].Value != -1)
-        {
-            return 0;
-        }
-        return 1;
+        GenerateBoardData();
     }
-    private int CheckMineOnLowerRight(int indexOfRow, int indexOfColumn)
+    public void ChangeNumberOfSquaresInRow(int amount)
     {
-        if (indexOfRow == Mathf.Sqrt(data.Length) - 1 || indexOfColumn == Mathf.Sqrt(data.Length) - 1)
-        {
-            return 0;
-        }
-        if (data[indexOfRow + 1, indexOfColumn + 1].Value != -1)
-        {
-            return 0;
-        }
-        return 1;
+        currentNumberOfSquaresInRow += amount;
+        FixLimitNumberOfMines();
+        currentNumberOfMines = currentNumberOfSquaresInRow;
+        GenerateBoardData();
     }
-    #endregion
-    public void IncreaseRow()
+    public void ChangeNumberOfMines(int amount)
     {
-        int maxRow = 10;
-        if (cellsInRow < maxRow)
-        {
-            ChangeCellsInRow(1);
-        }
+        currentNumberOfMines += amount;
+        GenerateBoardData();
     }
-    public void DecreaseRow()
-    {
-        int minRow = 5;
-        if (cellsInRow > minRow)
-        {
-            ChangeCellsInRow(-1);
-        }
-    }
-    public void IncreaseMines()
-    {
-        int maxMine = cellsInRow * 2;
-        if (amountOfMine < maxMine)
-        {
-            ChangeAmountOfMines(1);
-        }
-    }
-    public void DecreaseMines()
-    {
-        int minMine = cellsInRow;
-        if (amountOfMine > minMine)
-        {
-            ChangeAmountOfMines(-1);
-        }
-    }
+    public int MaxNumberOfSquaresInRow { get { return maxNumberOfSquaresInRow; } }
+    public int MinNumberOfSquaresInRow { get { return minNumberOfSquaresInRow; } }
+    public int MaxNumberOfMines { get { return maxNumberOfMines; } }
+    public int MinNumberOfMines { get { return minNumberOfMines; } }
 }
